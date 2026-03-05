@@ -133,6 +133,14 @@ impl<T> EventLoopBuilder<T> {
     }
 }
 
+/// Reset the event loop creation guard so a new `EventLoop` can be created.
+/// Called from platform-specific `Drop` impls (e.g., Android) where the process
+/// stays alive across activity recreations.
+#[cfg(android_platform)]
+pub(crate) fn reset_event_loop_created() {
+    EVENT_LOOP_CREATED.store(false, Ordering::Relaxed);
+}
+
 impl<T> fmt::Debug for EventLoop<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("EventLoop { .. }")

@@ -287,9 +287,13 @@ impl<T: 'static> EventLoop<T> {
                     warn!("TODO: forward onStop notification to application");
                 },
                 MainEvent::Destroy => {
-                    // XXX: maybe exit mainloop to drop things before being
-                    // killed by the OS?
-                    warn!("TODO: forward onDestroy notification to application");
+                    // The Android activity is being destroyed. Exit the event loop so that
+                    // android_main() can return, allowing android-activity's glue layer to
+                    // call notify_main_thread_stopped_running() and unblock onDestroy().
+                    // Without this, the Java main thread blocks indefinitely waiting for the
+                    // Rust thread to stop, causing an ANR.
+                    debug!("App Destroyed - requesting event loop exit");
+                    self.window_target.p.exit();
                 },
                 MainEvent::InsetsChanged { .. } => {
                     // XXX: how to forward this state to applications?
@@ -532,7 +536,13 @@ impl<T: 'static> EventLoop<T> {
         if self.exiting() {
             self.loop_running = false;
 
-            callback(event::Event::LoopExiting, self.window_target());
+            // On Android, the window may already be destroyed (via NativeWindowDestroyed)
+            // before LoopExiting fires. Catch any panic from the callback so the event
+            // loop still exits cleanly, allowing notify_main_thread_stopped_running() to
+            // be called and the activity lifecycle to complete normally.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                callback(event::Event::LoopExiting, self.window_target());
+            }));
 
             PumpStatus::Exit(0)
         } else {
@@ -627,6 +637,16 @@ impl<T: 'static> EventLoop<T> {
 
     fn exiting(&self) -> bool {
         self.window_target.p.exiting()
+    }
+}
+
+impl<T: 'static> Drop for EventLoop<T> {
+    fn drop(&mut self) {
+        // Reset the creation guard so a new EventLoop can be created after this one is dropped.
+        // On Android, the activity may be recreated (e.g., after a configuration change) while
+        // the process stays alive. The new activity spawns a new thread calling android_main(),
+        // which must be able to create a fresh EventLoop.
+        crate::event_loop::reset_event_loop_created();
     }
 }
 
