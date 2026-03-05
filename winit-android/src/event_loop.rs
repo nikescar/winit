@@ -246,9 +246,13 @@ impl EventLoop {
                     app.suspended(self.window_target());
                 },
                 MainEvent::Destroy => {
-                    // XXX: maybe exit mainloop to drop things before being
-                    // killed by the OS?
-                    warn!("TODO: forward onDestroy notification to application");
+                    // The Android activity is being destroyed. Exit the event loop so that
+                    // android_main() can return, allowing android-activity's glue layer to
+                    // call notify_main_thread_stopped_running() and unblock onDestroy().
+                    // Without this, the Java main thread blocks indefinitely waiting for the
+                    // Rust thread to stop, causing an ANR.
+                    debug!("App Destroyed - requesting event loop exit");
+                    self.window_target.exit();
                 },
                 MainEvent::InsetsChanged { .. } => {
                     // XXX: how to forward this state to applications?
